@@ -1,9 +1,8 @@
-# 任务信息编辑器 - 独立桌面工具 v2.3
-# 新增：修复Excel多行列粘贴、支持拖拽下拉自动填充递增序号、右键粘贴
+# 任务信息编辑器 - 独立桌面工具 v2.4
+# 新增：粘贴时自动将回车换行替换为“、”，实现像 Excel 一样的下拉递增序号（带小黑点填充柄）
 import sys
 import os
 import json
-import re
 from PySide6 import QtWidgets, QtCore, QtGui
 
 DEFAULT_TXT_PATH = r"D:/VRED_Renders/batch_tasks.txt"
@@ -12,10 +11,123 @@ DEFAULT_DRAFT_PATH = r"D:/VRED_Renders/batch_tasks_draft.json"
 COLUMNS = ["序号", "文件夹", "摄像机", "视点", "隔离", "变量"]
 COL_WIDTHS = [50, 70, 120, 300, 200, 200] 
 
+# ================= 自定义表格类：实现下拉填充和小黑点 =================
+class ExcelLikeTable(QtWidgets.QTableWidget):
+    def __init__(self, rows, columns, parent=None):
+        super().__init__(rows, columns, parent)
+        self.fill_handle_size = 6
+        self.is_dragging = False
+        self.drag_start_row = -1
+        self.drag_start_col = -1
+        self.setMouseTracking(True)  # 允许实时获取鼠标位置以改变光标
+
+    # 1. 绘制右下角的小黑点
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        selected = self.selectedRanges()
+        if not selected:
+            return
+        
+        # 取选中区域的右下角单元格
+        bottom_right = selected[0].bottomRight()
+        rect = self.visualRect(self.model().index(bottom_right.row(), bottom_right.column()))
+        
+        if rect.isValid():
+            painter = QtGui.QPainter(self.viewport())
+            painter.setRenderHint(QtGui.QPainter.Antialiasing)
+            painter.setBrush(QtGui.QBrush(QtCore.Qt.black))
+            painter.setPen(QtCore.Qt.NoPen)
+            
+            # 在黑点位置画一个小方块
+            x = rect.right() - self.fill_handle_size + 1
+            y = rect.bottom() - self.fill_handle_size + 1
+            painter.drawRect(x, y, self.fill_handle_size, self.fill_handle_size)
+            painter.end()
+
+    # 2. 鼠标移动：检测是否悬停在黑点上，改变光标
+    def mouseMoveEvent(self, event):
+        if self.is_dragging:
+            return # 拖动过程中不处理悬停
+        
+        selected = self.selectedRanges()
+        if selected:
+            bottom_right = selected[0].bottomRight()
+            rect = self.visualRect(self.model().index(bottom_right.row(), bottom_right.column()))
+            
+            # 定义黑点的感应区域
+            handle_rect = QtCore.QRect(
+                rect.right() - self.fill_handle_size, 
+                rect.bottom() - self.fill_handle_size, 
+                self.fill_handle_size * 2, 
+                self.fill_handle_size * 2
+            )
+            
+            if handle_rect.contains(event.position().toPoint()):
+                self.setCursor(QtCore.Qt.CrossCursor) # 变成十字光标
+            else:
+                self.setCursor(QtCore.Qt.ArrowCursor)
+        super().mouseMoveEvent(event)
+
+    # 3. 鼠标按下：如果点在小黑点上，开始拖动
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            selected = self.selectedRanges()
+            if selected:
+                bottom_right = selected[0].bottomRight()
+                rect = self.visualRect(self.model().index(bottom_right.row(), bottom_right.column()))
+                handle_rect = QtCore.QRect(
+                    rect.right() - self.fill_handle_size, 
+                    rect.bottom() - self.fill_handle_size, 
+                    self.fill_handle_size * 2, 
+                    self.fill_handle_size * 2
+                )
+                if handle_rect.contains(event.position().toPoint()):
+                    self.is_dragging = True
+                    self.drag_start_row = bottom_right.row()
+                    self.drag_start_col = bottom_right.column()
+                    return # 拦截事件，不传给默认的表格选择
+        super().mousePressEvent(event)
+
+    # 4. 鼠标松开：计算下拉了几行，并自动填充数据
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton and self.is_dragging:
+            self.is_dragging = False
+            self.setCursor(QtCore.Qt.ArrowCursor)
+            
+            index = self.indexAt(event.position().toPoint())
+            if index.isValid() and index.column() == self.drag_start_col:
+                end_row = index.row()
+                if end_row > self.drag_start_row:
+                    self.perform_fill(self.drag_start_row, end_row, self.drag_start_col)
+            return
+        super().mouseReleaseEvent(event)
+
+    # 5. 执行填充逻辑（如果是序号列则递增，其他列则复制）
+    def perform_fill(self, start_row, end_row, col):
+        item = self.item(start_row, col)
+        if not item: return
+        
+        base_text = item.text().strip()
+        is_number = base_text.isdigit()
+        
+        for row in range(start_row + 1, end_row + 1):
+            target_item = self.item(row, col)
+            if not target_item:
+                target_item = QtWidgets.QTableWidgetItem()
+                self.setItem(row, col, target_item)
+            
+            if col == 0 and is_number:
+                # 第一列且是数字，自动递增
+                target_item.setText(str(int(base_text) + (row - start_row)))
+            else:
+                # 其他列，直接复制内容
+                target_item.setText(base_text)
+
+# ================= 主窗口 =================
 class TaskEditor(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.3")
+        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.4")
         self.resize(1100, 600)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -66,7 +178,8 @@ class TaskEditor(QtWidgets.QWidget):
         layout.addLayout(toolbar2)
 
         # ================= 表格区域 =================
-        self.table = QtWidgets.QTableWidget(0, len(COLUMNS))
+        # 使用自定义的 ExcelLikeTable
+        self.table = ExcelLikeTable(0, len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         
         header = self.table.horizontalHeader()
@@ -82,13 +195,13 @@ class TaskEditor(QtWidgets.QWidget):
         self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         
-        # 核心优化：给表格安装事件过滤器，拦截Ctrl+V
+        # 安装事件过滤器，拦截 Ctrl+V
         self.table.installEventFilter(self)
         
         layout.addWidget(self.table)
 
         # ================= 状态栏 =================
-        self.status = QtWidgets.QLabel("就绪。支持 Excel 多行复制 (按Ctrl+V粘贴)，支持右下角下拉自动递增序号。")
+        self.status = QtWidgets.QLabel("就绪。支持粘贴 (Ctrl+V)，选中格子后拉动右下角黑点可下拉递增。")
         self.status.setStyleSheet("color: #555;")
         layout.addWidget(self.status)
 
@@ -120,26 +233,13 @@ class TaskEditor(QtWidgets.QWidget):
         self.table.setRowCount(0)
         self.status.setText("已清空全部内容")
 
-    # ================= 事件过滤器：处理粘贴与下拉序号 =================
+    # ================= 事件过滤器：处理粘贴 =================
     def eventFilter(self, obj, event):
-        # 1. 拦截表格的 Ctrl+V 粘贴
         if obj == self.table and event.type() == QtCore.QEvent.KeyPress:
             if event.matches(QtGui.QKeySequence.Paste):
                 self.paste_from_clipboard()
                 return True
-                
-        # 2. 拦截序号列的拖拽填充
-        if obj == self.table and event.type() == QtCore.QEvent.KeyPress:
-            pass # 预留位置
-
         return super().eventFilter(obj, event)
-
-    def keyPressEvent(self, event):
-        if event.matches(QtGui.QKeySequence.Paste):
-            self.paste_from_clipboard()
-            event.accept()
-        else:
-            super().keyPressEvent(event)
 
     # ================= 右键菜单 =================
     def show_context_menu(self, pos):
@@ -154,7 +254,7 @@ class TaskEditor(QtWidgets.QWidget):
         elif action == delete_action:
             self.delete_rows()
 
-    # ================= 核心优化：粘贴逻辑 =================
+    # ================= 粘贴逻辑：自动替换换行 =================
     def paste_from_clipboard(self):
         clipboard = QtWidgets.QApplication.clipboard()
         text = clipboard.text()
@@ -171,8 +271,13 @@ class TaskEditor(QtWidgets.QWidget):
         
         self.table.setUpdatesEnabled(False)
         for r_offset, line in enumerate(lines):
-            # 处理 Excel 中的 tab 分隔符
+            # 1. 按制表符拆分单元格
             cells = line.split('\t')
+            
+            # 如果这一行全是空的换行，跳过
+            if len(cells) == 1 and cells[0].strip() == "":
+                continue
+
             target_row = start_row + r_offset
             
             if target_row >= self.table.rowCount():
@@ -185,42 +290,15 @@ class TaskEditor(QtWidgets.QWidget):
                     if not item:
                         item = QtWidgets.QTableWidgetItem()
                         self.table.setItem(target_row, target_col, item)
-                    item.setText(cell_text.strip())
+                    
+                    # 2. 核心修改：将格子内部的回车换行 \r 或 \n 替换为顿号
+                    clean_text = cell_text.replace('\r\n', '、').replace('\n', '、').replace('\r', '、')
+                    item.setText(clean_text.strip())
                     
         self.table.setUpdatesEnabled(True)
-        self.status.setText(f"成功粘贴 {len(lines)} 行数据")
+        self.status.setText(f"成功粘贴 {len(lines)} 行数据（已自动替换换行）")
 
-    # ================= 表格下拉填充逻辑 (自动递增序号) =================
-    def closeEditor(self, editor, hint):
-        # 当单元格编辑完成时触发
-        super().closeEditor(editor, hint)
-        
-    # 重写表格方法，捕获拖拽填充后的动作
-    def on_table_data_changed(self, topLeft, bottomRight):
-        # 只处理序号列 (第0列)
-        if topLeft.column() == 0 and bottomRight.column() == 0:
-            start_row = topLeft.row()
-            end_row = bottomRight.row()
-            
-            if start_row == end_row:
-                return # 没有拖拽多行
-
-            # 获取起始行的数字
-            start_text = self.table.item(start_row, 0).text().strip()
-            if not start_text.isdigit():
-                return # 如果第一行不是数字，不处理
-
-            start_num = int(start_text)
-            
-            # 从第二行开始递增
-            for row in range(start_row + 1, end_row + 1):
-                item = self.table.item(row, 0)
-                if not item:
-                    item = QtWidgets.QTableWidgetItem()
-                    self.table.setItem(row, 0, item)
-                item.setText(str(start_num + (row - start_row)))
-
-    # ================= 草稿保存与读取 (JSON) =================
+    # ================= 草稿保存与读取 =================
     def save_draft(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "保存草稿", DEFAULT_DRAFT_PATH, "JSON Files (*.json)")
@@ -346,11 +424,6 @@ class TaskEditor(QtWidgets.QWidget):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     w = TaskEditor()
-    
-    # ================= 绑定拖拽序号核心逻辑 =================
-    # 当单元格数据发生变化时，触发递增计算
-    w.table.itemChanged.connect(w.on_table_data_changed)
-    
     w.show()
     sys.exit(app.exec())
 
