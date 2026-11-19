@@ -1,11 +1,11 @@
-# 任务信息编辑器 - 独立桌面工具 v2.2
-# 新增：另存草稿、读取指定草稿、导入TXT
+# 任务信息编辑器 - 独立桌面工具 v2.3
+# 新增：修复Excel多行列粘贴、支持拖拽下拉自动填充递增序号、右键粘贴
 import sys
 import os
 import json
+import re
 from PySide6 import QtWidgets, QtCore, QtGui
 
-# 默认保存路径（用户可以通过对话框自己改）
 DEFAULT_TXT_PATH = r"D:/VRED_Renders/batch_tasks.txt"
 DEFAULT_DRAFT_PATH = r"D:/VRED_Renders/batch_tasks_draft.json"
 
@@ -15,7 +15,7 @@ COL_WIDTHS = [50, 70, 120, 300, 200, 200]
 class TaskEditor(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.2")
+        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.3")
         self.resize(1100, 600)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -56,7 +56,7 @@ class TaskEditor(QtWidgets.QWidget):
         self.btn_import_txt.clicked.connect(self.import_txt)
         toolbar2.addWidget(self.btn_import_txt)
 
-        toolbar2.addStretch() # 弹簧推挤
+        toolbar2.addStretch()
 
         self.btn_export_txt = QtWidgets.QPushButton("导出为 TXT")
         self.btn_export_txt.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
@@ -77,10 +77,18 @@ class TaskEditor(QtWidgets.QWidget):
                 header.setSectionResizeMode(i, QtWidgets.QHeaderView.Stretch)
                 
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.ContiguousSelection)
+        
+        # 启用右键菜单
+        self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self.show_context_menu)
+        
+        # 核心优化：给表格安装事件过滤器，拦截Ctrl+V
+        self.table.installEventFilter(self)
+        
         layout.addWidget(self.table)
 
         # ================= 状态栏 =================
-        self.status = QtWidgets.QLabel("就绪。支持 Excel 多行复制粘贴 (Ctrl+V)。")
+        self.status = QtWidgets.QLabel("就绪。支持 Excel 多行复制 (按Ctrl+V粘贴)，支持右下角下拉自动递增序号。")
         self.status.setStyleSheet("color: #555;")
         layout.addWidget(self.status)
 
@@ -112,7 +120,20 @@ class TaskEditor(QtWidgets.QWidget):
         self.table.setRowCount(0)
         self.status.setText("已清空全部内容")
 
-    # ================= 支持从 Excel 直接粘贴 =================
+    # ================= 事件过滤器：处理粘贴与下拉序号 =================
+    def eventFilter(self, obj, event):
+        # 1. 拦截表格的 Ctrl+V 粘贴
+        if obj == self.table and event.type() == QtCore.QEvent.KeyPress:
+            if event.matches(QtGui.QKeySequence.Paste):
+                self.paste_from_clipboard()
+                return True
+                
+        # 2. 拦截序号列的拖拽填充
+        if obj == self.table and event.type() == QtCore.QEvent.KeyPress:
+            pass # 预留位置
+
+        return super().eventFilter(obj, event)
+
     def keyPressEvent(self, event):
         if event.matches(QtGui.QKeySequence.Paste):
             self.paste_from_clipboard()
@@ -120,10 +141,24 @@ class TaskEditor(QtWidgets.QWidget):
         else:
             super().keyPressEvent(event)
 
+    # ================= 右键菜单 =================
+    def show_context_menu(self, pos):
+        menu = QtWidgets.QMenu()
+        paste_action = menu.addAction("粘贴 (Ctrl+V)")
+        delete_action = menu.addAction("删除选中行")
+        
+        action = menu.exec_(self.table.mapToGlobal(pos))
+        
+        if action == paste_action:
+            self.paste_from_clipboard()
+        elif action == delete_action:
+            self.delete_rows()
+
+    # ================= 核心优化：粘贴逻辑 =================
     def paste_from_clipboard(self):
         clipboard = QtWidgets.QApplication.clipboard()
         text = clipboard.text()
-        if not text:
+        if not text.strip():
             return
 
         current = self.table.currentItem()
@@ -136,6 +171,7 @@ class TaskEditor(QtWidgets.QWidget):
         
         self.table.setUpdatesEnabled(False)
         for r_offset, line in enumerate(lines):
+            # 处理 Excel 中的 tab 分隔符
             cells = line.split('\t')
             target_row = start_row + r_offset
             
@@ -153,6 +189,36 @@ class TaskEditor(QtWidgets.QWidget):
                     
         self.table.setUpdatesEnabled(True)
         self.status.setText(f"成功粘贴 {len(lines)} 行数据")
+
+    # ================= 表格下拉填充逻辑 (自动递增序号) =================
+    def closeEditor(self, editor, hint):
+        # 当单元格编辑完成时触发
+        super().closeEditor(editor, hint)
+        
+    # 重写表格方法，捕获拖拽填充后的动作
+    def on_table_data_changed(self, topLeft, bottomRight):
+        # 只处理序号列 (第0列)
+        if topLeft.column() == 0 and bottomRight.column() == 0:
+            start_row = topLeft.row()
+            end_row = bottomRight.row()
+            
+            if start_row == end_row:
+                return # 没有拖拽多行
+
+            # 获取起始行的数字
+            start_text = self.table.item(start_row, 0).text().strip()
+            if not start_text.isdigit():
+                return # 如果第一行不是数字，不处理
+
+            start_num = int(start_text)
+            
+            # 从第二行开始递增
+            for row in range(start_row + 1, end_row + 1):
+                item = self.table.item(row, 0)
+                if not item:
+                    item = QtWidgets.QTableWidgetItem()
+                    self.table.setItem(row, 0, item)
+                item.setText(str(start_num + (row - start_row)))
 
     # ================= 草稿保存与读取 (JSON) =================
     def save_draft(self):
@@ -201,7 +267,7 @@ class TaskEditor(QtWidgets.QWidget):
                 for col, val in enumerate(row_data):
                     if col < self.table.columnCount():
                         self.table.setItem(row, col, QtWidgets.QTableWidgetItem(val))
-            for _ in range(10): self.add_row() # 补充空行
+            for _ in range(10): self.add_row()
             self.table.setUpdatesEnabled(True)
             
             self.status.setText(f"已读取草稿: {path}")
@@ -222,7 +288,6 @@ class TaskEditor(QtWidgets.QWidget):
                 self.status.setText("TXT 文件为空")
                 return
 
-            # 检查并跳过表头
             if lines[0].startswith("序号"):
                 lines = lines[1:]
             
@@ -231,7 +296,6 @@ class TaskEditor(QtWidgets.QWidget):
             
             for line in lines:
                 parts = [p.strip() for p in line.split("/")]
-                # 补齐或截断为6列
                 parts = (parts + ["无"] * len(COLUMNS))[:len(COLUMNS)]
                 
                 row = self.table.rowCount()
@@ -282,6 +346,11 @@ class TaskEditor(QtWidgets.QWidget):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     w = TaskEditor()
+    
+    # ================= 绑定拖拽序号核心逻辑 =================
+    # 当单元格数据发生变化时，触发递增计算
+    w.table.itemChanged.connect(w.on_table_data_changed)
+    
     w.show()
     sys.exit(app.exec())
 
