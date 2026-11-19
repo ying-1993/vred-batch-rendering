@@ -1,5 +1,5 @@
-# 任务信息编辑器 - 独立桌面工具 v2.5
-# 新增：导出 TXT 时自动跳过第一行数据
+# 任务信息编辑器 - 独立桌面工具 v2.6
+# 新增：导出 TXT 时不写入表头文字，直接保存数据行
 import sys
 import os
 import json
@@ -117,7 +117,7 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
 class TaskEditor(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.5")
+        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.6")
         self.resize(1100, 600)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -179,16 +179,14 @@ class TaskEditor(QtWidgets.QWidget):
                 header.setSectionResizeMode(i, QtWidgets.QHeaderView.Stretch)
                 
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.ContiguousSelection)
-        
         self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
-        
         self.table.installEventFilter(self)
         
         layout.addWidget(self.table)
 
         # ================= 状态栏 =================
-        self.status = QtWidgets.QLabel("就绪。支持粘贴 (Ctrl+V)，导出时自动忽略第一行。")
+        self.status = QtWidgets.QLabel("就绪。导出时直接保存数据，不包含文字表头。")
         self.status.setStyleSheet("color: #555;")
         layout.addWidget(self.status)
 
@@ -344,6 +342,7 @@ class TaskEditor(QtWidgets.QWidget):
                 self.status.setText("TXT 文件为空")
                 return
 
+            # 兼容旧文件：如果第一行是旧版带表头的文字，则跳过
             if lines[0].startswith("序号"):
                 lines = lines[1:]
             
@@ -366,7 +365,7 @@ class TaskEditor(QtWidgets.QWidget):
         except Exception as e:
             self.status.setText(f"导入失败: {e}")
 
-    # ================= 核心修改：导出时跳过第一行 =================
+    # ================= 核心修改：导出不写表头，从第一行开始写 =================
     def export_txt(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "导出 TXT", DEFAULT_TXT_PATH, "Text Files (*.txt)")
@@ -379,10 +378,10 @@ class TaskEditor(QtWidgets.QWidget):
                 
             count = 0
             with open(path, 'w', encoding='utf-8-sig') as f:
-                f.write("/".join(COLUMNS) + "\n")
+                # 不再写入 f.write("/".join(COLUMNS) + "\n")
                 
-                # 修改点：range 从 1 开始，即跳过表格的第 0 行（第一行数据）
-                for row in range(1, self.table.rowCount()):
+                # 从第 0 行（即表格第一行数据）开始读取
+                for row in range(0, self.table.rowCount()):
                     vals = []
                     is_empty = True
                     for col in range(len(COLUMNS)):
@@ -397,7 +396,7 @@ class TaskEditor(QtWidgets.QWidget):
                     f.write("/".join(vals) + "\n")
                     count += 1
                     
-            self.status.setText(f"成功导出 {count} 条任务（已跳过第1行）: {path}")
+            self.status.setText(f"成功导出 {count} 条任务（无表头文字）: {path}")
         except Exception as e:
             self.status.setText(f"导出失败: {e}")
 
