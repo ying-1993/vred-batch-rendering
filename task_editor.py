@@ -1,5 +1,5 @@
-# 任务信息编辑器 - 独立桌面工具 v2.4
-# 新增：粘贴时自动将回车换行替换为“、”，实现像 Excel 一样的下拉递增序号（带小黑点填充柄）
+# 任务信息编辑器 - 独立桌面工具 v2.5
+# 新增：导出 TXT 时自动跳过第一行数据
 import sys
 import os
 import json
@@ -19,16 +19,14 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
         self.is_dragging = False
         self.drag_start_row = -1
         self.drag_start_col = -1
-        self.setMouseTracking(True)  # 允许实时获取鼠标位置以改变光标
+        self.setMouseTracking(True)
 
-    # 1. 绘制右下角的小黑点
     def paintEvent(self, event):
         super().paintEvent(event)
         selected = self.selectedRanges()
         if not selected:
             return
         
-        # 取选中区域的右下角单元格
         bottom_right = selected[0].bottomRight()
         rect = self.visualRect(self.model().index(bottom_right.row(), bottom_right.column()))
         
@@ -38,23 +36,20 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
             painter.setBrush(QtGui.QBrush(QtCore.Qt.black))
             painter.setPen(QtCore.Qt.NoPen)
             
-            # 在黑点位置画一个小方块
             x = rect.right() - self.fill_handle_size + 1
             y = rect.bottom() - self.fill_handle_size + 1
             painter.drawRect(x, y, self.fill_handle_size, self.fill_handle_size)
             painter.end()
 
-    # 2. 鼠标移动：检测是否悬停在黑点上，改变光标
     def mouseMoveEvent(self, event):
         if self.is_dragging:
-            return # 拖动过程中不处理悬停
+            return
         
         selected = self.selectedRanges()
         if selected:
             bottom_right = selected[0].bottomRight()
             rect = self.visualRect(self.model().index(bottom_right.row(), bottom_right.column()))
             
-            # 定义黑点的感应区域
             handle_rect = QtCore.QRect(
                 rect.right() - self.fill_handle_size, 
                 rect.bottom() - self.fill_handle_size, 
@@ -63,12 +58,11 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
             )
             
             if handle_rect.contains(event.position().toPoint()):
-                self.setCursor(QtCore.Qt.CrossCursor) # 变成十字光标
+                self.setCursor(QtCore.Qt.CrossCursor)
             else:
                 self.setCursor(QtCore.Qt.ArrowCursor)
         super().mouseMoveEvent(event)
 
-    # 3. 鼠标按下：如果点在小黑点上，开始拖动
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
             selected = self.selectedRanges()
@@ -85,10 +79,9 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
                     self.is_dragging = True
                     self.drag_start_row = bottom_right.row()
                     self.drag_start_col = bottom_right.column()
-                    return # 拦截事件，不传给默认的表格选择
+                    return
         super().mousePressEvent(event)
 
-    # 4. 鼠标松开：计算下拉了几行，并自动填充数据
     def mouseReleaseEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton and self.is_dragging:
             self.is_dragging = False
@@ -102,7 +95,6 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
             return
         super().mouseReleaseEvent(event)
 
-    # 5. 执行填充逻辑（如果是序号列则递增，其他列则复制）
     def perform_fill(self, start_row, end_row, col):
         item = self.item(start_row, col)
         if not item: return
@@ -117,17 +109,15 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
                 self.setItem(row, col, target_item)
             
             if col == 0 and is_number:
-                # 第一列且是数字，自动递增
                 target_item.setText(str(int(base_text) + (row - start_row)))
             else:
-                # 其他列，直接复制内容
                 target_item.setText(base_text)
 
 # ================= 主窗口 =================
 class TaskEditor(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.4")
+        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.5")
         self.resize(1100, 600)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -178,7 +168,6 @@ class TaskEditor(QtWidgets.QWidget):
         layout.addLayout(toolbar2)
 
         # ================= 表格区域 =================
-        # 使用自定义的 ExcelLikeTable
         self.table = ExcelLikeTable(0, len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         
@@ -191,24 +180,21 @@ class TaskEditor(QtWidgets.QWidget):
                 
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.ContiguousSelection)
         
-        # 启用右键菜单
         self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
         
-        # 安装事件过滤器，拦截 Ctrl+V
         self.table.installEventFilter(self)
         
         layout.addWidget(self.table)
 
         # ================= 状态栏 =================
-        self.status = QtWidgets.QLabel("就绪。支持粘贴 (Ctrl+V)，选中格子后拉动右下角黑点可下拉递增。")
+        self.status = QtWidgets.QLabel("就绪。支持粘贴 (Ctrl+V)，导出时自动忽略第一行。")
         self.status.setStyleSheet("color: #555;")
         layout.addWidget(self.status)
 
         for _ in range(10):
             self.add_row()
 
-    # ================= 基础表格操作 =================
     def add_row(self):
         row = self.table.rowCount()
         self.table.insertRow(row)
@@ -233,7 +219,6 @@ class TaskEditor(QtWidgets.QWidget):
         self.table.setRowCount(0)
         self.status.setText("已清空全部内容")
 
-    # ================= 事件过滤器：处理粘贴 =================
     def eventFilter(self, obj, event):
         if obj == self.table and event.type() == QtCore.QEvent.KeyPress:
             if event.matches(QtGui.QKeySequence.Paste):
@@ -241,7 +226,6 @@ class TaskEditor(QtWidgets.QWidget):
                 return True
         return super().eventFilter(obj, event)
 
-    # ================= 右键菜单 =================
     def show_context_menu(self, pos):
         menu = QtWidgets.QMenu()
         paste_action = menu.addAction("粘贴 (Ctrl+V)")
@@ -254,7 +238,6 @@ class TaskEditor(QtWidgets.QWidget):
         elif action == delete_action:
             self.delete_rows()
 
-    # ================= 粘贴逻辑：自动替换换行 =================
     def paste_from_clipboard(self):
         clipboard = QtWidgets.QApplication.clipboard()
         text = clipboard.text()
@@ -271,10 +254,8 @@ class TaskEditor(QtWidgets.QWidget):
         
         self.table.setUpdatesEnabled(False)
         for r_offset, line in enumerate(lines):
-            # 1. 按制表符拆分单元格
             cells = line.split('\t')
             
-            # 如果这一行全是空的换行，跳过
             if len(cells) == 1 and cells[0].strip() == "":
                 continue
 
@@ -291,14 +272,12 @@ class TaskEditor(QtWidgets.QWidget):
                         item = QtWidgets.QTableWidgetItem()
                         self.table.setItem(target_row, target_col, item)
                     
-                    # 2. 核心修改：将格子内部的回车换行 \r 或 \n 替换为顿号
                     clean_text = cell_text.replace('\r\n', '、').replace('\n', '、').replace('\r', '、')
                     item.setText(clean_text.strip())
                     
         self.table.setUpdatesEnabled(True)
         self.status.setText(f"成功粘贴 {len(lines)} 行数据（已自动替换换行）")
 
-    # ================= 草稿保存与读取 =================
     def save_draft(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "保存草稿", DEFAULT_DRAFT_PATH, "JSON Files (*.json)")
@@ -352,7 +331,6 @@ class TaskEditor(QtWidgets.QWidget):
         except Exception as e:
             self.status.setText(f"读取草稿失败: {e}")
 
-    # ================= TXT 导入与导出 =================
     def import_txt(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "导入 TXT", DEFAULT_TXT_PATH, "Text Files (*.txt);;All Files (*)")
@@ -388,6 +366,7 @@ class TaskEditor(QtWidgets.QWidget):
         except Exception as e:
             self.status.setText(f"导入失败: {e}")
 
+    # ================= 核心修改：导出时跳过第一行 =================
     def export_txt(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "导出 TXT", DEFAULT_TXT_PATH, "Text Files (*.txt)")
@@ -401,7 +380,9 @@ class TaskEditor(QtWidgets.QWidget):
             count = 0
             with open(path, 'w', encoding='utf-8-sig') as f:
                 f.write("/".join(COLUMNS) + "\n")
-                for row in range(self.table.rowCount()):
+                
+                # 修改点：range 从 1 开始，即跳过表格的第 0 行（第一行数据）
+                for row in range(1, self.table.rowCount()):
                     vals = []
                     is_empty = True
                     for col in range(len(COLUMNS)):
@@ -416,7 +397,7 @@ class TaskEditor(QtWidgets.QWidget):
                     f.write("/".join(vals) + "\n")
                     count += 1
                     
-            self.status.setText(f"成功导出 {count} 条任务: {path}")
+            self.status.setText(f"成功导出 {count} 条任务（已跳过第1行）: {path}")
         except Exception as e:
             self.status.setText(f"导出失败: {e}")
 
