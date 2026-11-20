@@ -1,5 +1,5 @@
-# 任务信息编辑器 - 独立桌面工具 v2.8
-# 修复：导出 TXT 无反应；移除草稿保存/读取
+# 任务信息编辑器 - 独立桌面工具 v2.9
+# 修复：QTableWidgetSelectionRange 没有 bottomRight() 导致 paintEvent 异常
 import sys
 import os
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -19,13 +19,21 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
         self.drag_start_col = -1
         self.setMouseTracking(True)
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
+    def _selected_bottom_right(self):
+        """返回当前选中区域右下角的 (row, col)，无选中返回 None。"""
         selected = self.selectedRanges()
         if not selected:
+            return None
+        rng = selected[0]
+        return rng.bottomRow(), rng.rightColumn()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        br = self._selected_bottom_right()
+        if br is None:
             return
-        bottom_right = selected[0].bottomRight()
-        rect = self.visualRect(self.model().index(bottom_right.row(), bottom_right.column()))
+        row, col = br
+        rect = self.visualRect(self.model().index(row, col))
         if rect.isValid():
             painter = QtGui.QPainter(self.viewport())
             painter.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -39,10 +47,10 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
     def mouseMoveEvent(self, event):
         if self.is_dragging:
             return
-        selected = self.selectedRanges()
-        if selected:
-            bottom_right = selected[0].bottomRight()
-            rect = self.visualRect(self.model().index(bottom_right.row(), bottom_right.column()))
+        br = self._selected_bottom_right()
+        if br is not None:
+            row, col = br
+            rect = self.visualRect(self.model().index(row, col))
             handle_rect = QtCore.QRect(
                 rect.right() - self.fill_handle_size,
                 rect.bottom() - self.fill_handle_size,
@@ -57,10 +65,10 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
-            selected = self.selectedRanges()
-            if selected:
-                bottom_right = selected[0].bottomRight()
-                rect = self.visualRect(self.model().index(bottom_right.row(), bottom_right.column()))
+            br = self._selected_bottom_right()
+            if br is not None:
+                row, col = br
+                rect = self.visualRect(self.model().index(row, col))
                 handle_rect = QtCore.QRect(
                     rect.right() - self.fill_handle_size,
                     rect.bottom() - self.fill_handle_size,
@@ -69,8 +77,8 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
                 )
                 if handle_rect.contains(event.position().toPoint()):
                     self.is_dragging = True
-                    self.drag_start_row = bottom_right.row()
-                    self.drag_start_col = bottom_right.column()
+                    self.drag_start_row = row
+                    self.drag_start_col = col
                     return
         super().mousePressEvent(event)
 
@@ -106,7 +114,7 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
 class TaskEditor(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.8")
+        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.9")
         self.resize(1100, 600)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -260,7 +268,6 @@ class TaskEditor(QtWidgets.QWidget):
             self.status.setText(f"导入失败: {e}")
 
     def _collect_rows(self):
-        """收集非空数据行。"""
         rows = []
         col_count = self.table.columnCount()
         for row in range(self.table.rowCount()):
@@ -286,13 +293,11 @@ class TaskEditor(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.information(self, "提示", "没有可导出的数据行。")
                 return
 
-            # 使用 QFileDialog 实例方式，默认路径传空字符串，避免无效路径导致不弹出
             dialog = QtWidgets.QFileDialog(self, "导出 TXT")
             dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptSave)
             dialog.setFileMode(QtWidgets.QFileDialog.AnyFile)
             dialog.setNameFilter("Text Files (*.txt);;All Files (*)")
             dialog.setDefaultSuffix("txt")
-            # 仅当默认目录存在时才设置，且用 setDirectory
             default_dir = os.path.dirname(DEFAULT_TXT_PATH)
             if default_dir and os.path.isdir(default_dir):
                 dialog.setDirectory(default_dir)
