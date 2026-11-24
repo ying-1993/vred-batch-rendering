@@ -1,13 +1,13 @@
-# 任务信息编辑器 - 独立桌面工具 v2.9
-# 修复：QTableWidgetSelectionRange 没有 bottomRight() 导致 paintEvent 异常
+# 任务信息编辑器 - 独立桌面工具 v3.1
+# 变更：所有列均支持手动拖拽调节宽度
 import sys
 import os
 from PySide6 import QtWidgets, QtCore, QtGui
 
 DEFAULT_TXT_PATH = r"D:/VRED_Renders/batch_tasks.txt"
 
-COLUMNS = ["序号", "文件夹", "摄像机", "视点", "隔离", "变量"]
-COL_WIDTHS = [50, 70, 120, 300, 200, 200]
+COLUMNS = ["序号", "文件夹", "摄像机", "环境", "灯光", "视点", "隔离", "变量", "层"]
+COL_WIDTHS = [50, 70, 120, 120, 120, 300, 200, 200, 100]
 
 
 class ExcelLikeTable(QtWidgets.QTableWidget):
@@ -114,8 +114,8 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
 class TaskEditor(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VRED 批量渲染任务编辑器 v2.9")
-        self.resize(1100, 600)
+        self.setWindowTitle("VRED 批量渲染任务编辑器 v3.1")
+        self.resize(1200, 600)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -148,11 +148,11 @@ class TaskEditor(QtWidgets.QWidget):
         self.table = ExcelLikeTable(0, len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         header = self.table.horizontalHeader()
+        # 所有列均使用 Interactive 模式（默认），支持手动拖拽调整宽度
+        header.setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
+        header.setStretchLastSection(False)
         for i, width in enumerate(COL_WIDTHS):
-            if i < 4:
-                self.table.setColumnWidth(i, width)
-            else:
-                header.setSectionResizeMode(i, QtWidgets.QHeaderView.Stretch)
+            self.table.setColumnWidth(i, width)
         self.table.setSelectionMode(QtWidgets.QAbstractItemView.ContiguousSelection)
         self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.show_context_menu)
@@ -169,7 +169,7 @@ class TaskEditor(QtWidgets.QWidget):
     def add_row(self):
         row = self.table.rowCount()
         self.table.insertRow(row)
-        defaults = ["", "", "无", "无", "无", "无"]
+        defaults = ["", "", "无", "无", "无", "无", "无", "无", "无"]
         for col, val in enumerate(defaults):
             item = QtWidgets.QTableWidgetItem(val)
             self.table.setItem(row, col, item)
