@@ -1,5 +1,5 @@
-# 任务信息编辑器 - 独立桌面工具 v3.2
-# 列顺序：序号 / 文件夹 / 摄像机 / 视点 / 环境 / 灯光 / 隔离 / 变量 / 层
+# 任务信息编辑器 - 独立桌面工具 v3.3
+# 列顺序：序号 / 文件夹 / 摄像机 / 视点 / 后缀 / 环境 / 灯光 / 隔离 / 变量 / 层
 # 所有列均支持手动拖拽调节宽度
 import sys
 import os
@@ -7,8 +7,8 @@ from PySide6 import QtWidgets, QtCore, QtGui
 
 DEFAULT_TXT_PATH = r"D:/VRED_Renders/batch_tasks.txt"
 
-COLUMNS = ["序号", "文件夹", "摄像机", "视点", "环境", "灯光", "隔离", "变量", "层"]
-COL_WIDTHS = [50, 70, 120, 300, 120, 120, 200, 200, 100]
+COLUMNS = ["序号", "文件夹", "摄像机", "视点", "后缀", "环境", "灯光", "隔离", "变量", "层"]
+COL_WIDTHS = [50, 70, 120, 300, 100, 120, 120, 200, 200, 100]
 
 
 class ExcelLikeTable(QtWidgets.QTableWidget):
@@ -115,8 +115,8 @@ class ExcelLikeTable(QtWidgets.QTableWidget):
 class TaskEditor(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("VRED 批量渲染任务编辑器 v3.2")
-        self.resize(1200, 600)
+        self.setWindowTitle("VRED 批量渲染任务编辑器 v3.3")
+        self.resize(1300, 600)
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -170,7 +170,7 @@ class TaskEditor(QtWidgets.QWidget):
     def add_row(self):
         row = self.table.rowCount()
         self.table.insertRow(row)
-        defaults = ["", "", "无", "无", "无", "无", "无", "无", "无"]
+        defaults = ["", "", "无", "无", "无", "无", "无", "无", "无", "无"]
         for col, val in enumerate(defaults):
             item = QtWidgets.QTableWidgetItem(val)
             self.table.setItem(row, col, item)
@@ -352,4 +352,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
